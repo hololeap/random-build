@@ -1,0 +1,86 @@
+cabal-version:   3.4
+name:            gentoo-haskell-random-builder
+version:         0.1.0.0
+synopsis:
+  A tool to build random Haskell packages in a gentoo repository and evaluate the success rate.
+
+description:
+  A tool to build random Haskell packages in a gentoo repository and
+  evaluate the success rate.
+
+homepage:
+  https://github.com/GuillaumedeVolpiano/gentoo-haskell-random-builder
+
+license:         BSD-3-Clause
+license-file:    LICENSE
+author:          Xavier Dectot
+maintainer:      xavier@wheredoibegin.fr
+
+-- copyright:
+category:        Development
+build-type:      Simple
+extra-doc-files: CHANGELOG.md
+
+common warnings
+  ghc-options: -Wall
+
+flag mtl
+  description: Build the mtl-only variant rather than the effectful one
+  default:     False 
+  manual:      True
+
+library
+  import:            warnings
+  exposed-modules:
+    GHRB.Core
+    GHRB.IO
+
+  build-depends:
+    , base                  >=4.17.0.0
+    , bytestring            ^>=0.12.1.0
+    , flatparse             ^>=0.5.2.1
+    , mtl                   ^>=2.3.1
+    , process               ^>=1.6.25
+    , random                ^>=1.2.1.0
+    , text                  ^>=2.1.1
+    , time                  ^>=1.12
+    , transformers          ^>=0.6.1.0
+    , unix                  ^>=2.8.6.0
+    , unordered-containers  ^>=0.2.20
+
+  hs-source-dirs:   src
+  default-language: Haskell2010
+
+executable gentoo-haskell-random-builder
+  import:           warnings
+
+  if flag(mtl)
+    main-is: Main-mtl.hs
+
+  else
+    main-is:  Main.hs
+
+  if flag(mtl)
+    build-depends:
+      , base                           >=4.17.0.0
+      , bytestring                     ^>=0.12.1.0
+      , gentoo-haskell-random-builder
+      , mtl                            ^>=2.3.1
+      , process                        ^>=1.6.25.0
+      , random                         ^>=1.2.1.0
+      , unix                           ^>=2.8.6.0
+
+  else
+    build-depends:
+      , base                           >=4.17.0.0
+      , bytestring                     ^>=0.12.1.0
+      , effectful                      ^>=2.5.1.0
+      , effectful-core                 ^>=2.5.0
+      , gentoo-haskell-random-builder
+      , mtl                            ^>=2.3.1
+      , process                        ^>=1.6.25.0
+      , random                         ^>=1.2.1.0
+      , unix                           ^>=2.8.6.0
+
+  hs-source-dirs:   app
+  default-language: Haskell2010
