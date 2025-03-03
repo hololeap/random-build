@@ -1,4 +1,5 @@
 {-# LANGUAGE LambdaCase #-}
+
 module CoreMain
   ( runMain
   ) where
@@ -12,7 +13,7 @@ import           Control.Monad.Reader    (asks)
 import qualified Data.ByteString.Char8   as B (pack)
 import           Data.Maybe              (isNothing)
 import           GHRB.Core               (Args (Args), MonadGHRB,
-                                          Output (OutFile, Std),
+                                          Output (DevNull, OutFile, Std),
                                           Running (Running), St,
                                           buildEmptyState, getInterrupt)
 import           GHRB.IO                 (randomBuild, terminate)
@@ -48,25 +49,40 @@ args interrupt =
              <> help "Path to the haskell-updater binary")
     <*> ((\case
             Nothing -> Std
-            Just a -> a) <$> optional (outputFile <|> stdOut))
+            Just a -> a)
+           <$> optional (outputFile <|> stdOut))
     <*> ((\case
-            Nothing -> Just Std
-            Just a -> a) <$> optional (logFile <|> stdErr <|> quiet))
+            Nothing -> Std
+            Just a -> a)
+           <$> optional (logFile <|> stdErr <|> quiet))
 
 outputFile :: Parser Output
-outputFile = OutFile <$> strOption (long "out" <> short 'o' <> metavar "Filepath" <> help "File to output to")
+outputFile =
+  OutFile
+    <$> strOption
+          (long "out"
+             <> short 'o'
+             <> metavar "Filepath"
+             <> help "File to output to")
 
 stdOut :: Parser Output
 stdOut = flag' Std (long "stdout" <> short 's' <> help "Output to stdout")
 
-logFile :: Parser (Maybe Output)
-logFile = Just . OutFile <$> strOption (long "log" <> short 'l' <> metavar "Filepath" <> help "File to log the process to")
+logFile :: Parser Output
+logFile =
+  OutFile
+    <$> strOption
+          (long "log"
+             <> short 'l'
+             <> metavar "Filepath"
+             <> help "File to log the process to")
 
-stdErr :: Parser (Maybe Output)
-stdErr = flag' (Just Std) (long "stderr" <> short 'e' <> help "Output the log to stderr")
+stdErr :: Parser Output
+stdErr =
+  flag' Std (long "stderr" <> short 'e' <> help "Output the log to stderr")
 
-quiet :: Parser (Maybe Output)
-quiet = flag' Nothing (long "quiet" <> short 'q' <> help "Be less verbose")
+quiet :: Parser Output
+quiet = flag' DevNull (long "quiet" <> short 'q' <> help "Be less verbose")
 
 builder :: MonadGHRB m => m ()
 builder = do
@@ -81,7 +97,11 @@ runMain :: (MonadGHRB m) => (St -> Args -> m () -> IO ()) -> IO ()
 runMain runGHRB = do
   interrupt <- newEmptyMVar
   initialState <- buildEmptyState <$> liftIO newStdGen
-  args' <- execParser . info (args interrupt <**> helper) $ (fullDesc <> progDesc "A utility to repeatedly randomly build haskell packages from ::haskell")
+  args' <-
+    execParser . info (args interrupt <**> helper)
+      $ (fullDesc
+           <> progDesc
+                "A utility to repeatedly randomly build haskell packages from ::haskell")
   hSetBuffering stdout NoBuffering
   hSetBuffering stderr NoBuffering
   void . installHandler sigINT (Catch $ putMVar interrupt ()) $ Nothing

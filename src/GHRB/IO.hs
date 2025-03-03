@@ -5,28 +5,57 @@ module GHRB.IO
   , terminate
   ) where
 
-import           Control.Monad.IO.Class (liftIO)
-import           Control.Monad.State    (get, gets, modify)
-import           Data.ByteString        (ByteString)
-import qualified Data.ByteString.Char8  as B (pack)
-import           Data.Foldable          (for_, traverse_)
-import           Data.Maybe             (fromJust, isJust)
-import qualified Data.Text              as T (unpack)
-import           Data.Time.Clock.System (SystemTime, getSystemTime)
-import           FlatParse.Basic        (Result (OK))
-import           GHRB.Core              (MonadGHRB, Package, PackageMap,
-                                         Running (Running, Terminated),
-                                         addTried, failedResolve,
-                                         filePathPackage, generator, getUntried,
-                                         hasCompleted, hasDowngraded, hasFailed,
-                                         logOutput, package, parseDowngrades,
-                                         parsePackageList, prettyPackage,
-                                         randomPackage, readProcessWithExitCode,
-                                         sizeMap, stderr, stdout, toDate, bStderr,
-                                         untried, getEix, getEmerge, getHU, getInterrupt)
-import           System.Exit            (ExitCode (ExitFailure, ExitSuccess))
-import Control.Monad.Reader (asks)
-import Control.Concurrent.MVar (tryTakeMVar)
+import           Control.Concurrent.MVar (tryTakeMVar)
+import           Control.Monad.IO.Class  (liftIO)
+import           Control.Monad.Reader    (asks)
+import           Control.Monad.State     (get, gets, modify)
+import           Data.ByteString         (ByteString)
+import qualified Data.ByteString.Char8   as B (pack)
+import           Data.Foldable           (for_, traverse_)
+import           Data.Maybe              (fromJust, isJust)
+import qualified Data.Text               as T (unpack)
+import           Data.Time.Clock.System  (SystemTime, getSystemTime)
+import           FlatParse.Basic         (Result (OK))
+import           GHRB.Core               (MonadGHRB,
+                                          Output (DevNull, OutFile, Std),
+                                          Package, PackageMap,
+                                          Running (Running, Terminated),
+                                          addTried, failedResolve,
+                                          filePathPackage, generator, getEix,
+                                          getEmerge, getHU, getInterrupt,
+                                          getUntried, hasCompleted,
+                                          hasDowngraded, hasFailed, package,
+                                          parseDowngrades, parsePackageList,
+                                          prettyPackage, randomPackage,
+                                          readProcessWithExitCode, sizeMap,
+                                          toDate, untried, getErrMode, getOutputMode
+                                          )
+import qualified GHRB.Core               as GC (appendFile, writeFile, hPutStrLn)
+import           System.Exit             (ExitCode (ExitFailure, ExitSuccess))
+import qualified System.IO as IO (stderr, stdout)
+
+
+stdout :: MonadGHRB m => ByteString -> m ()
+stdout message = do
+  outmode <- asks getOutputMode
+  case outmode of
+    Std        -> GC.hPutStrLn IO.stdout message
+    OutFile fp -> GC.appendFile fp message
+    DevNull -> pure ()
+
+bStderr :: MonadGHRB m => ByteString -> m ()
+bStderr message = do
+  errmode <- asks getErrMode
+  case errmode of
+    DevNull      -> pure ()
+    Std          -> GC.hPutStrLn IO.stderr message
+    (OutFile fp) -> GC.appendFile fp message
+
+logOutput :: MonadGHRB m => FilePath -> String -> m ()
+logOutput filepath = GC.writeFile filepath . B.pack
+
+stderr :: MonadGHRB m => String -> m ()
+stderr = bStderr . B.pack
 
 tmpLogRoot :: String
 tmpLogRoot = "/tmp/random-pkg-"
@@ -76,13 +105,16 @@ runEix args = do
 
 runEmerge :: MonadGHRB m => [String] -> Package -> m (ExitCode, String, String)
 runEmerge args pkg =
-  asks getEmerge >>= \emerge -> readProcessWithExitCode
-    emerge
-    (mergeArgs ++ args ++ [T.unpack . prettyPackage $ pkg])
-    ""
+  asks getEmerge >>= \emerge ->
+    readProcessWithExitCode
+      emerge
+      (mergeArgs ++ args ++ [T.unpack . prettyPackage $ pkg])
+      ""
 
 runHaskellUpdater :: MonadGHRB m => m (ExitCode, String, String)
-runHaskellUpdater = asks getHU >>= \haskellUpdater -> readProcessWithExitCode haskellUpdater huArgs ""
+runHaskellUpdater =
+  asks getHU >>= \haskellUpdater ->
+    readProcessWithExitCode haskellUpdater huArgs ""
 
 currentUntried :: MonadGHRB m => m (Either Running PackageMap)
 currentUntried = do
@@ -227,7 +259,7 @@ checkInterrupt f = do
   interrupted <- liftIO $ tryTakeMVar interrupt
   case interrupted of
     Nothing -> f
-    _ -> terminate Nothing
+    _       -> terminate Nothing
 
 randomBuild :: MonadGHRB m => m Running
 randomBuild = do
@@ -238,12 +270,13 @@ randomBuild = do
     Left r -> pure r
     Right untried' -> do
       modify . getUntried $ untried'
-      checkInterrupt $ do eitherPkg <- selectFrom
-                          case eitherPkg of
-                              Left r -> pure r
-                              Right pkg -> do
-                                  modify (\st -> st {package = pkg})
-                                  modify (addTried pkg)
-                                  r <- checkInterrupt tryInstall
-                                  totalStats >>= traverse_ bStderr
-                                  pure r
+      checkInterrupt $ do
+        eitherPkg <- selectFrom
+        case eitherPkg of
+          Left r -> pure r
+          Right pkg -> do
+            modify (\st -> st {package = pkg})
+            modify (addTried pkg)
+            r <- checkInterrupt tryInstall
+            totalStats >>= traverse_ bStderr
+            pure r

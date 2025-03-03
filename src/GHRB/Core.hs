@@ -28,7 +28,7 @@ module GHRB.Core
   , getOutputMode
   , getErrMode
   , -- OutputMode
-    Output(Std, OutFile)
+    Output(Std, DevNull, OutFile)
   , -- Running state
     Running(Running, Terminated)
   , -- Package Map
@@ -49,11 +49,10 @@ module GHRB.Core
     getUntried
   , -- the GHRB Monad class
     MonadGHRB
-  , stdout
   , readProcessWithExitCode
-  , stderr
-  , bStderr
-  , logOutput
+  , GHRB.Core.appendFile
+  , hPutStrLn
+  , GHRB.Core.writeFile
   ) where
 
 import           Control.Applicative     (many, optional, (<|>))
@@ -63,7 +62,7 @@ import           Control.Monad.IO.Class  (MonadIO)
 import           Control.Monad.Reader    (MonadReader)
 import           Control.Monad.State     (MonadState)
 import           Data.ByteString         (ByteString)
-import qualified Data.ByteString.Char8   as B (pack, unpack)
+import qualified Data.ByteString.Char8   as B (pack)
 import           Data.HashMap.Strict     (HashMap, alter, elems, keys, (!))
 import qualified Data.HashMap.Strict     as Map (differenceWith, size, toList)
 import           Data.HashSet            (HashSet)
@@ -79,20 +78,18 @@ import           FlatParse.Basic         (Parser, Result (OK), char, eof,
                                           runParser, satisfy, string)
 import           System.Exit             (ExitCode)
 import           System.Random           (StdGen, randomR)
+import System.IO (Handle)
 
 -- | A monad class to output messages. Minimum complete definition stdout,
 -- readProcessWithExitCode, bStdErr || stderr, logOutput
 class (Monad m, MonadIO m, MonadState St m, MonadReader Args m) =>
       MonadGHRB m
   where
-  stdout :: ByteString -> m ()
   readProcessWithExitCode ::
        FilePath -> [String] -> String -> m (ExitCode, String, String)
-  stderr :: String -> m ()
-  stderr = bStderr . B.pack
-  bStderr :: ByteString -> m ()
-  bStderr = stderr . B.unpack
-  logOutput :: FilePath -> String -> m ()
+  hPutStrLn :: Handle -> ByteString -> m ()
+  appendFile :: FilePath -> ByteString -> m ()
+  writeFile :: FilePath -> ByteString -> m ()
 
 type Package = (Text, Text)
 
@@ -122,11 +119,12 @@ data Args = Args
   , getEmerge     :: String
   , getHU         :: String
   , getOutputMode :: Output
-  , getErrMode    :: Maybe Output
+  , getErrMode    :: Output
   }
 
 data Output
   = Std
+  | DevNull
   | OutFile String
 
 instance Show St where
