@@ -19,20 +19,29 @@ import           Control.Monad          (void)
 import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.State    (StateT, evalStateT)
 import           CoreMain               (runMain)
-import qualified Data.ByteString        as B (writeFile)
-import qualified Data.ByteString.Char8  as B (hPutStrLn, pack, putStrLn)
+import qualified Data.ByteString        as B (writeFile, appendFile)
+import qualified Data.ByteString.Char8  as B (hPutStrLn, pack)
 import           GHRB.Core              (MonadGHRB, St, logOutput,
-                                         readProcessWithExitCode, stderr,
-                                         stdout, Args)
-import qualified System.IO              as IO (stderr)
+                                         readProcessWithExitCode, bStderr,
+                                         stdout, Args, Output(Std, OutFile), getOutputMode, getErrMode)
+import qualified System.IO              as IO (stderr, stdout)
 import qualified System.Process         as SP (readProcessWithExitCode)
-import Control.Monad.Reader (ReaderT, runReaderT)
+import Control.Monad.Reader (ReaderT, runReaderT, asks)
 
 instance MonadGHRB (StateT St (ReaderT Args IO)) where
   readProcessWithExitCode fp args input =
     liftIO $ SP.readProcessWithExitCode fp args input
-  stdout message = liftIO $ B.putStrLn message
-  stderr message = liftIO $ B.hPutStrLn IO.stderr (B.pack message)
+  stdout message = do 
+    outmode <- asks getOutputMode
+    case outmode of
+      Std -> liftIO $ B.hPutStrLn IO.stdout message
+      OutFile fp -> liftIO $ B.appendFile fp message
+  bStderr message = do
+    errmode <- asks getErrMode
+    case errmode of
+      Nothing -> pure ()
+      Just Std -> liftIO $ B.hPutStrLn IO.stderr message
+      Just (OutFile fp) -> liftIO $ B.appendFile fp message
   logOutput filepath output = liftIO $ B.writeFile filepath (B.pack output)
 
 runGHRB :: St -> Args -> StateT St (ReaderT Args IO) () -> IO ()

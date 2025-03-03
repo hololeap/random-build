@@ -20,11 +20,15 @@ module GHRB.Core
   , hasFailed
   , addTried
   , --Console arguments
-  Args(Args)
+    Args(Args)
   , getInterrupt
   , getEix
   , getEmerge
   , getHU
+  , getOutputMode
+  , getErrMode
+  , -- OutputMode
+    Output(Std, OutFile)
   , -- Running state
     Running(Running, Terminated)
   , -- Package Map
@@ -53,8 +57,10 @@ module GHRB.Core
   ) where
 
 import           Control.Applicative     (many, optional, (<|>))
+import           Control.Concurrent.MVar (MVar)
 import           Control.Monad           (void)
 import           Control.Monad.IO.Class  (MonadIO)
+import           Control.Monad.Reader    (MonadReader)
 import           Control.Monad.State     (MonadState)
 import           Data.ByteString         (ByteString)
 import qualified Data.ByteString.Char8   as B (pack, unpack)
@@ -73,8 +79,6 @@ import           FlatParse.Basic         (Parser, Result (OK), char, eof,
                                           runParser, satisfy, string)
 import           System.Exit             (ExitCode)
 import           System.Random           (StdGen, randomR)
-import Control.Concurrent.MVar (MVar)
-import Control.Monad.Reader (MonadReader)
 
 -- | A monad class to output messages. Minimum complete definition stdout,
 -- readProcessWithExitCode, bStdErr || stderr, logOutput
@@ -112,7 +116,18 @@ data St = St
   , generator  :: StdGen
   } deriving (Eq)
 
-data Args = Args { getInterrupt :: MVar (), getEix :: String, getEmerge :: String, getHU :: String }
+data Args = Args
+  { getInterrupt  :: MVar ()
+  , getEix        :: String
+  , getEmerge     :: String
+  , getHU         :: String
+  , getOutputMode :: Output
+  , getErrMode    :: Maybe Output
+  }
+
+data Output
+  = Std
+  | OutFile String
 
 instance Show St where
   show st =

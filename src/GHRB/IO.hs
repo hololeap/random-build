@@ -9,7 +9,7 @@ import           Control.Monad.IO.Class (liftIO)
 import           Control.Monad.State    (get, gets, modify)
 import           Data.ByteString        (ByteString)
 import qualified Data.ByteString.Char8  as B (pack)
-import           Data.Foldable          (for_)
+import           Data.Foldable          (for_, traverse_)
 import           Data.Maybe             (fromJust, isJust)
 import qualified Data.Text              as T (unpack)
 import           Data.Time.Clock.System (SystemTime, getSystemTime)
@@ -22,7 +22,7 @@ import           GHRB.Core              (MonadGHRB, Package, PackageMap,
                                          logOutput, package, parseDowngrades,
                                          parsePackageList, prettyPackage,
                                          randomPackage, readProcessWithExitCode,
-                                         sizeMap, stderr, stdout, toDate,
+                                         sizeMap, stderr, stdout, toDate, bStderr,
                                          untried, getEix, getEmerge, getHU, getInterrupt)
 import           System.Exit            (ExitCode (ExitFailure, ExitSuccess))
 import Control.Monad.Reader (asks)
@@ -244,4 +244,6 @@ randomBuild = do
                               Right pkg -> do
                                   modify (\st -> st {package = pkg})
                                   modify (addTried pkg)
-                                  checkInterrupt tryInstall
+                                  r <- checkInterrupt tryInstall
+                                  totalStats >>= traverse_ bStderr
+                                  pure r

@@ -1,7 +1,9 @@
+{-# LANGUAGE LambdaCase #-}
 module CoreMain
   ( runMain
   ) where
 
+import           Control.Applicative     (optional, (<**>), (<|>))
 import           Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar,
                                           tryTakeMVar)
 import           Control.Monad           (void)
@@ -10,12 +12,13 @@ import           Control.Monad.Reader    (asks)
 import qualified Data.ByteString.Char8   as B (pack)
 import           Data.Maybe              (isNothing)
 import           GHRB.Core               (Args (Args), MonadGHRB,
+                                          Output (OutFile, Std),
                                           Running (Running), St,
                                           buildEmptyState, getInterrupt)
 import           GHRB.IO                 (randomBuild, terminate)
-import           Options.Applicative     (Parser, execParser, fullDesc, help,
-                                          info, long, metavar, progDesc, short,
-                                          strOption, value, helper, (<**>))
+import           Options.Applicative     (Parser, execParser, flag', fullDesc,
+                                          help, helper, info, long, metavar,
+                                          progDesc, short, strOption, value)
 import           System.IO               (BufferMode (NoBuffering),
                                           hSetBuffering, stderr, stdout)
 import           System.Posix.Signals    (Handler (Catch), installHandler,
@@ -43,6 +46,27 @@ args interrupt =
              <> metavar "Filepath"
              <> value "/usr/sbin/haskell-updater"
              <> help "Path to the haskell-updater binary")
+    <*> ((\case
+            Nothing -> Std
+            Just a -> a) <$> optional (outputFile <|> stdOut))
+    <*> ((\case
+            Nothing -> Just Std
+            Just a -> a) <$> optional (logFile <|> stdErr <|> quiet))
+
+outputFile :: Parser Output
+outputFile = OutFile <$> strOption (long "out" <> short 'o' <> metavar "Filepath" <> help "File to output to")
+
+stdOut :: Parser Output
+stdOut = flag' Std (long "stdout" <> short 's' <> help "Output to stdout")
+
+logFile :: Parser (Maybe Output)
+logFile = Just . OutFile <$> strOption (long "log" <> short 'l' <> metavar "Filepath" <> help "File to log the process to")
+
+stdErr :: Parser (Maybe Output)
+stdErr = flag' (Just Std) (long "stderr" <> short 'e' <> help "Output the log to stderr")
+
+quiet :: Parser (Maybe Output)
+quiet = flag' Nothing (long "quiet" <> short 'q' <> help "Be less verbose")
 
 builder :: MonadGHRB m => m ()
 builder = do

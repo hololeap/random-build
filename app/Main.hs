@@ -18,40 +18,50 @@
 module Main where
 
 import           Control.Monad                      (void)
+import           Control.Monad.Reader               (MonadReader, ask, local)
 import           Control.Monad.State                (MonadState, state)
 import           CoreMain                           (runMain)
 import qualified Data.ByteString.Char8              as B (pack)
 import           Effectful                          (Eff, IOE, runEff, (:>))
 import           Effectful.Console.ByteString       (Console, runConsole)
-import qualified Effectful.Console.ByteString       as EC (putStrLn)
 import           Effectful.FileSystem               (FileSystem, runFileSystem)
-import qualified Effectful.FileSystem.IO            as IO (stderr)
-import qualified Effectful.FileSystem.IO.ByteString as EF (hPutStrLn, writeFile)
+import qualified Effectful.FileSystem.IO            as IO (stderr, stdout)
+import qualified Effectful.FileSystem.IO.ByteString as EF (appendFile,
+                                                           hPutStrLn, writeFile)
 import           Effectful.Process                  (Process, runProcess)
 import qualified Effectful.Process                  as EP (readProcessWithExitCode)
+import           Effectful.Reader.Static            (Reader, asks, runReader)
+import qualified Effectful.Reader.Static            as ER (ask, local)
 import           Effectful.State.Static.Shared      (State, evalState)
 import qualified Effectful.State.Static.Shared      as ES (state)
-import           GHRB.Core                          (MonadGHRB,
-                                                     St,
-                                                     bStderr, 
+import           GHRB.Core                          (Args, MonadGHRB,
+                                                     Output (OutFile, Std),
+                                                     St, bStderr, getOutputMode, getErrMode,
                                                      logOutput,
                                                      readProcessWithExitCode,
-                                                     stdout, Args)
-import Effectful.Reader.Static (Reader,runReader)
-import qualified Effectful.Reader.Static as ER (ask, local)
-import Control.Monad.Reader (MonadReader, ask, local)
+                                                     stdout)
 
 instance ( IOE :> es
          , Console :> es
          , Process :> es
          , FileSystem :> es
+         , Reader Args :> es
          , MonadReader Args (Eff es)
          , MonadState St (Eff es)
          ) =>
          MonadGHRB (Eff es) where
   readProcessWithExitCode = EP.readProcessWithExitCode
-  stdout = EC.putStrLn
-  bStderr = EF.hPutStrLn IO.stderr
+  stdout message = do
+    outmode <- asks getOutputMode
+    case outmode of
+      Std     -> EF.hPutStrLn IO.stdout message
+      OutFile fp -> EF.appendFile fp message
+  bStderr message = do
+    errmode <- asks getErrMode
+    case errmode of
+      Nothing -> pure ()
+      Just Std -> EF.hPutStrLn IO.stderr message
+      Just (OutFile fp) -> EF.appendFile fp message
   logOutput filepath = EF.writeFile filepath . B.pack
 
 instance (MonadState a (Eff es), State a :> es) => MonadState a (Eff es) where
