@@ -5,13 +5,12 @@ module GHRB.IO
   , terminate
   ) where
 
-import           Control.Concurrent.MVar (tryTakeMVar)
 import           Control.Monad.IO.Class  (liftIO)
 import           Control.Monad.Reader    (asks)
 import           Control.Monad.State     (get, gets, modify)
 import           Data.ByteString         (ByteString)
 import qualified Data.ByteString.Char8   as B (pack)
-import           Data.Foldable           (for_, traverse_)
+import           Data.Foldable           (traverse_)
 import           Data.Maybe              (fromJust, isJust)
 import qualified Data.Text               as T (unpack)
 import           Data.Time.Clock.System  (SystemTime, getSystemTime)
@@ -22,18 +21,18 @@ import           GHRB.Core               (MonadGHRB,
                                           Running (Running, Terminated),
                                           addTried, failedResolve,
                                           filePathPackage, generator, getEix,
-                                          getEmerge, getHU, getInterrupt,
-                                          getUntried, hasCompleted,
-                                          hasDowngraded, hasFailed, package,
-                                          parseDowngrades, parsePackageList,
-                                          prettyPackage, randomPackage,
+                                          getEmerge, getErrMode, getHU,
+                                          getOutputMode, getUntried,
+                                          hasCompleted, hasDowngraded,
+                                          hasFailed, package, parseDowngrades,
+                                          parsePackageList, prettyPackage,
+                                          randomPackage,
                                           readProcessWithExitCode, sizeMap,
-                                          toDate, untried, getErrMode, getOutputMode
-                                          )
-import qualified GHRB.Core               as GC (appendFile, writeFile, hPutStrLn)
+                                          toDate, untried)
+import qualified GHRB.Core               as GC (appendFile, hPutStrLn,
+                                                writeFile)
 import           System.Exit             (ExitCode (ExitFailure, ExitSuccess))
-import qualified System.IO as IO (stderr, stdout)
-
+import qualified System.IO               as IO (stderr, stdout)
 
 stdout :: MonadGHRB m => ByteString -> m ()
 stdout message = do
@@ -41,7 +40,7 @@ stdout message = do
   case outmode of
     Std        -> GC.hPutStrLn IO.stdout message
     OutFile fp -> GC.appendFile fp message
-    DevNull -> pure ()
+    DevNull    -> pure ()
 
 bStderr :: MonadGHRB m => ByteString -> m ()
 bStderr message = do
@@ -123,22 +122,21 @@ currentUntried = do
     ExitSuccess ->
       case notInstalled of
         (Just packageMap) -> pure . Right $ packageMap
-        Nothing ->
-          stderr "eix output parsing failed" >> Left <$> terminate Nothing
+        Nothing -> stderr "eix output parsing failed" >> pure (Left Terminated)
     ExitFailure 127 ->
       stderr "Received exit code 127 from eix. Is it installed"
         >> pure (Left Terminated)
-    ExitFailure 1 -> Left <$> terminate Nothing
+    ExitFailure 1 -> pure (Left Terminated)
     ExitFailure ef ->
       stderr ("eix exited with unsuccessful code " ++ show ef ++ "\n" ++ stdErr)
-        >> Left <$> terminate Nothing
+        >> pure (Left Terminated)
 
 selectFrom :: MonadGHRB m => m (Either Running Package)
 selectFrom = do
   toTry <- gets untried
   let sp = sizeMap toTry
   case sp of
-    0 -> Left <$> terminate (Just $ B.pack "Pool is empty! Exiting...")
+    0 -> pure (Left Terminated)
     _ -> do
       stderr $ "Choosing from pool of " ++ show sp ++ " packages..."
       g <- gets generator
@@ -172,7 +170,7 @@ install = do
     else modify (hasFailed pkg)
   (exitCode', _, _) <- runHaskellUpdater
   if exitCode' /= ExitSuccess
-    then terminate . Just . B.pack $ "haskell-updater failed"
+    then pure Terminated
     else pure Running
 
 resolveFailed :: MonadGHRB m => String -> m ()
@@ -223,13 +221,11 @@ totalStats = do
             ++ "%."
     else pure Nothing
 
-terminate :: MonadGHRB m => Maybe ByteString -> m Running
-terminate message = do
-  for_ message stdout
+terminate :: MonadGHRB m => m ()
+terminate = do
   st <- get
   stdout . B.pack $ show st
   totalStats >>= mapM_ stdout
-  pure Terminated
 
 capturePortageOutput :: MonadGHRB m => Package -> m (ExitCode, String)
 capturePortageOutput pkg = do
@@ -253,14 +249,6 @@ checkForDowngrades portageOutput = do
         else stderr "No downgrade detected" >> pure downgraded
     _ -> error "generic parser error"
 
-checkInterrupt :: MonadGHRB m => m Running -> m Running
-checkInterrupt f = do
-  interrupt <- asks getInterrupt
-  interrupted <- liftIO $ tryTakeMVar interrupt
-  case interrupted of
-    Nothing -> f
-    _       -> terminate Nothing
-
 randomBuild :: MonadGHRB m => m Running
 randomBuild = do
   stderr
@@ -270,13 +258,12 @@ randomBuild = do
     Left r -> pure r
     Right untried' -> do
       modify . getUntried $ untried'
-      checkInterrupt $ do
-        eitherPkg <- selectFrom
-        case eitherPkg of
-          Left r -> pure r
-          Right pkg -> do
-            modify (\st -> st {package = pkg})
-            modify (addTried pkg)
-            r <- checkInterrupt tryInstall
-            totalStats >>= traverse_ bStderr
-            pure r
+      eitherPkg <- selectFrom
+      case eitherPkg of
+        Left r -> pure r
+        Right pkg -> do
+          modify (\st -> st {package = pkg})
+          modify (addTried pkg)
+          r <- tryInstall
+          totalStats >>= traverse_ bStderr
+          pure r

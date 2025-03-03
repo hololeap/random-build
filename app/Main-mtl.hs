@@ -15,16 +15,18 @@
 -- Based on hololeap's build-random-haskell-pkgs.bash
 module Main where
 
-import           Control.Monad          (void)
+import           Control.Exception.Safe (finally)
 import           Control.Monad.IO.Class (liftIO)
+import           Control.Monad.Reader   (ReaderT, runReaderT)
 import           Control.Monad.State    (StateT, evalStateT)
 import           CoreMain               (runMain)
-import qualified Data.ByteString        as B (writeFile, appendFile)
+import qualified Data.ByteString        as B (appendFile, writeFile)
 import qualified Data.ByteString.Char8  as B (hPutStrLn)
-import           GHRB.Core              (MonadGHRB, St, 
-                                         readProcessWithExitCode, Args, hPutStrLn, writeFile, appendFile) 
+import           GHRB.Core              (Args, MonadGHRB, St, appendFile,
+                                         hPutStrLn, readProcessWithExitCode,
+                                         writeFile)
+import           GHRB.IO                (terminate)
 import qualified System.Process         as SP (readProcessWithExitCode)
-import Control.Monad.Reader (ReaderT, runReaderT)
 
 instance MonadGHRB (StateT St (ReaderT Args IO)) where
   readProcessWithExitCode fp args input =
@@ -34,7 +36,9 @@ instance MonadGHRB (StateT St (ReaderT Args IO)) where
   hPutStrLn handle message = liftIO $ B.hPutStrLn handle message
 
 runGHRB :: St -> Args -> StateT St (ReaderT Args IO) () -> IO ()
-runGHRB initialState args builder = void . flip runReaderT args $ evalStateT builder initialState
+runGHRB initialState args builder =
+  flip runReaderT args . flip evalStateT initialState
+    $ finally builder terminate
 
 main :: IO ()
 main = runMain runGHRB

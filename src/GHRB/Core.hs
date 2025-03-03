@@ -21,7 +21,6 @@ module GHRB.Core
   , addTried
   , --Console arguments
     Args(Args)
-  , getInterrupt
   , getEix
   , getEmerge
   , getHU
@@ -56,7 +55,6 @@ module GHRB.Core
   ) where
 
 import           Control.Applicative     (many, optional, (<|>))
-import           Control.Concurrent.MVar (MVar)
 import           Control.Monad           (void)
 import           Control.Monad.IO.Class  (MonadIO)
 import           Control.Monad.Reader    (MonadReader)
@@ -114,8 +112,8 @@ data St = St
   } deriving (Eq)
 
 data Args = Args
-  { getInterrupt  :: MVar ()
-  , getEix        :: String
+  { 
+  getEix        :: String
   , getEmerge     :: String
   , getHU         :: String
   , getOutputMode :: Output

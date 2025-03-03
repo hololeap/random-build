@@ -5,30 +5,21 @@ module CoreMain
   ) where
 
 import           Control.Applicative     (optional, (<**>), (<|>))
-import           Control.Concurrent.MVar (MVar, newEmptyMVar, putMVar,
-                                          tryTakeMVar)
-import           Control.Monad           (void)
+import           Control.Monad           (when)
 import           Control.Monad.IO.Class  (liftIO)
-import           Control.Monad.Reader    (asks)
-import qualified Data.ByteString.Char8   as B (pack)
-import           Data.Maybe              (isNothing)
 import           GHRB.Core               (Args (Args), MonadGHRB,
                                           Output (DevNull, OutFile, Std),
                                           Running (Running), St,
-                                          buildEmptyState, getInterrupt)
-import           GHRB.IO                 (randomBuild, terminate)
+                                          buildEmptyState)
+import           GHRB.IO                 (randomBuild)
 import           Options.Applicative     (Parser, execParser, flag', fullDesc,
                                           help, helper, info, long, metavar,
                                           progDesc, short, strOption, value)
-import           System.IO               (BufferMode (NoBuffering),
-                                          hSetBuffering, stderr, stdout)
-import           System.Posix.Signals    (Handler (Catch), installHandler,
-                                          sigINT)
 import           System.Random           (newStdGen)
 
-args :: MVar () -> Parser Args
-args interrupt =
-  Args interrupt
+args :: Parser Args
+args =
+  Args
     <$> strOption
           (long "eix"
              <> short 'e'
@@ -86,23 +77,15 @@ quiet = flag' DevNull (long "quiet" <> short 'q' <> help "Be less verbose")
 
 builder :: MonadGHRB m => m ()
 builder = do
-  interrupt <- asks getInterrupt
-  interrupted <- liftIO $ tryTakeMVar interrupt
   running <- randomBuild
-  if isNothing interrupted && running == Running
-    then randomBuild >> builder
-    else void (terminate (Just . B.pack $ "interrupted"))
+  when (running == Running) (randomBuild >> builder)
 
 runMain :: (MonadGHRB m) => (St -> Args -> m () -> IO ()) -> IO ()
 runMain runGHRB = do
-  interrupt <- newEmptyMVar
   initialState <- buildEmptyState <$> liftIO newStdGen
   args' <-
-    execParser . info (args interrupt <**> helper)
+    execParser . info (args <**> helper)
       $ (fullDesc
            <> progDesc
                 "A utility to repeatedly randomly build haskell packages from ::haskell")
-  hSetBuffering stdout NoBuffering
-  hSetBuffering stderr NoBuffering
-  void . installHandler sigINT (Catch $ putMVar interrupt ()) $ Nothing
   runGHRB initialState args' builder

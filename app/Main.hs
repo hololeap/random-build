@@ -17,12 +17,12 @@
 -- Based on hololeap's build-random-haskell-pkgs.bash
 module Main where
 
-import           Control.Monad                      (void)
 import           Control.Monad.Reader               (MonadReader, ask, local)
 import           Control.Monad.State                (MonadState, state)
 import           CoreMain                           (runMain)
 import           Effectful                          (Eff, IOE, runEff, (:>))
 import           Effectful.Console.ByteString       (Console, runConsole)
+import           Effectful.Exception                (finally)
 import           Effectful.FileSystem               (FileSystem, runFileSystem)
 import qualified Effectful.FileSystem.IO.ByteString as EF (appendFile,
                                                            hPutStrLn, writeFile)
@@ -32,12 +32,12 @@ import           Effectful.Reader.Static            (Reader, runReader)
 import qualified Effectful.Reader.Static            as ER (ask, local)
 import           Effectful.State.Static.Shared      (State, evalState)
 import qualified Effectful.State.Static.Shared      as ES (state)
-import           GHRB.Core                          (Args, MonadGHRB,
-                                                     St,
-                                                     appendFile,
-                                                     hPutStrLn,
+import           GHRB.Core                          (Args, MonadGHRB, St,
+                                                     appendFile, hPutStrLn,
                                                      readProcessWithExitCode,
                                                      writeFile)
+
+import           GHRB.IO                            (terminate)
 
 instance ( IOE :> es
          , Console :> es
@@ -65,14 +65,14 @@ runGHRB ::
   -> Args
   -> Eff '[ Reader Args, State St, Process, Console, FileSystem, IOE] ()
   -> IO ()
-runGHRB initialState args =
-  void
-    . runEff
+runGHRB initialState args builder =
+    runEff
     . runFileSystem
     . runConsole
     . runProcess
     . evalState initialState
     . runReader args
+    $ finally builder terminate
 
 main :: IO ()
 main = runMain runGHRB
