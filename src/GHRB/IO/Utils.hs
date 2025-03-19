@@ -3,9 +3,9 @@
 {-# LANGUAGE TypeOperators    #-}
 
 module GHRB.IO.Utils
-  ( printColor
-  , bStderr
+  ( bStderr
   , stderr
+  , bStdout
   , stdout
   , logOutput
   , getArgs
@@ -14,16 +14,13 @@ module GHRB.IO.Utils
 import           Control.Applicative                     ((<**>))
 import           Control.Monad                           (void)
 import           Control.Monad.IO.Class                  (liftIO)
-import qualified Data.ByteString.Char8                   as BS (pack)
-import qualified Data.ByteString.Lazy                    as BL (ByteString)
 import qualified Data.ByteString.Lazy.Char8              as BL (pack)
+import qualified Data.Text.Lazy.Encoding                 as TL (encodeUtf8)
 import           Effectful                               (Eff, IOE, (:>))
 import           Effectful.Environment                   (Environment, setEnv)
 import           Effectful.FileSystem                    (FileSystem,
                                                           findExecutable)
-import           Effectful.FileSystem.IO                 (Handle)
 import qualified Effectful.FileSystem.IO                 as IO (stderr, stdout)
-import qualified Effectful.FileSystem.IO.ByteString      as BS (hPutStrLn)
 import qualified Effectful.FileSystem.IO.ByteString.Lazy as BL (appendFile,
                                                                 hPutStrLn,
                                                                 writeFile)
@@ -38,42 +35,48 @@ import           GHRB.Core.Types                         (Args, EmergePath,
 import           Options.Applicative                     (execParser, fullDesc,
                                                           helper, info,
                                                           progDesc)
-import           System.Console.ANSI                     (setSGR)
-import           System.Console.ANSI.Types               (Color,
-                                                          ColorIntensity (Dull),
-                                                          ConsoleLayer (Foreground),
-                                                          SGR (Reset, SetColor))
+import           Prettyprinter                           (Pretty,
+                                                          SimpleDocStream,
+                                                          defaultLayoutOptions,
+                                                          layoutPretty, pretty,
+                                                          unAnnotateS)
+import           Prettyprinter.Render.Terminal           (AnsiStyle)
+import qualified Prettyprinter.Render.Terminal           as T (renderLazy)
+import qualified Prettyprinter.Render.Text               as TL (renderLazy)
 import           System.Exit                             (die)
 
-printColor ::
-     (IOE :> es, FileSystem :> es) => Handle -> Color -> String -> Eff es ()
-printColor h color message = do
-  void . liftIO $ setSGR [SetColor Foreground Dull color]
-  void . BS.hPutStrLn h . BS.pack $ message
-  void . liftIO $ setSGR [Reset]
-  BS.hPutStrLn h . BS.pack $ ""
-
-stdout :: (FileSystem :> es, Reader Args :> es) => BL.ByteString -> Eff es ()
-stdout message = do
+bStdout ::
+     (FileSystem :> es, Reader Args :> es)
+  => SimpleDocStream AnsiStyle
+  -> Eff es ()
+bStdout message = do
   outmode <- asks getOutputMode
   case outmode of
-    Std        -> BL.hPutStrLn IO.stdout message
-    OutFile fp -> BL.appendFile fp message
-    DevNull    -> pure ()
+    Std -> BL.hPutStrLn IO.stdout . TL.encodeUtf8 . T.renderLazy $ message
+    OutFile fp ->
+      BL.appendFile fp . TL.encodeUtf8 . TL.renderLazy . unAnnotateS $ message
+    DevNull -> pure ()
+
+stdout :: (FileSystem :> es, Reader Args :> es, Pretty a) => a -> Eff es ()
+stdout = bStdout . layoutPretty defaultLayoutOptions . pretty
 
 logOutput :: (FileSystem :> es) => FilePath -> String -> Eff es ()
 logOutput filepath = BL.writeFile filepath . BL.pack
 
-stderr :: (FileSystem :> es, Reader Args :> es) => String -> Eff es ()
-stderr = bStderr . BL.pack
+stderr :: (FileSystem :> es, Reader Args :> es, Pretty a) => a -> Eff es ()
+stderr = bStderr . layoutPretty defaultLayoutOptions . pretty
 
-bStderr :: (FileSystem :> es, Reader Args :> es) => BL.ByteString -> Eff es ()
+bStderr ::
+     (FileSystem :> es, Reader Args :> es)
+  => SimpleDocStream AnsiStyle
+  -> Eff es ()
 bStderr message = do
   errmode <- asks getErrMode
   case errmode of
-    DevNull      -> pure ()
-    Std          -> BL.hPutStrLn IO.stderr message
-    (OutFile fp) -> BL.appendFile fp message
+    DevNull -> pure ()
+    Std -> BL.hPutStrLn IO.stderr . TL.encodeUtf8 . T.renderLazy $ message
+    (OutFile fp) ->
+      BL.appendFile fp . TL.encodeUtf8 . TL.renderLazy . unAnnotateS $ message
 
 getArgs :: (IOE :> es, FileSystem :> es, Environment :> es) => Eff es Args
 getArgs = do

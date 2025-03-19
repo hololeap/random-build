@@ -10,24 +10,22 @@ module GHRB.IO.Cmd
   , runTransparent
   ) where
 
-import           Conduit                            (iterMC, sinkLazy)
-import           Control.Monad                      (void)
-import           Control.Monad.IO.Class             (liftIO)
-import qualified Data.ByteString                    as BS (ByteString, hPut)
-import qualified Data.ByteString.Lazy               as BL (ByteString)
-import           Data.Conduit                       (ConduitT, (.|))
-import           Data.Conduit.Process               (sourceProcessWithStreams)
-import           Data.Void                          (Void)
-import           Effectful                          (Eff, IOE,
-                                                     (:>))
-import           Effectful.FileSystem               (FileSystem)
-import qualified Effectful.FileSystem.IO            as IO (stderr)
-import           GHRB.Core.Types                    (Stderr, Stdout)
-import           GHRB.IO.Utils                      (printColor)
-import           System.Console.ANSI.Types          (Color (Magenta))
-import           System.Exit                        (ExitCode)
-import           System.IO                          (Handle, stderr, stdout)
-import           System.Process                     (proc)
+import           Conduit                   (iterMC, sinkLazy)
+import           Control.Monad.IO.Class    (liftIO)
+import qualified Data.ByteString           as BS (ByteString, hPut)
+import qualified Data.ByteString.Lazy      as BL (ByteString)
+import           Data.Conduit              (ConduitT, (.|))
+import           Data.Conduit.Process      (sourceProcessWithStreams)
+import           Data.Void                 (Void)
+import           Effectful                 (Eff, IOE, (:>))
+import           Effectful.FileSystem      (FileSystem)
+import Effectful.Reader.Static (Reader)
+import           GHRB.Core.Types           (Stderr, Stdout, Args)
+import           GHRB.Core.Utils           (prettyMessage)
+import GHRB.IO.Utils (bStderr)
+import           System.Exit               (ExitCode)
+import           System.IO                 (Handle, stderr, stdout)
+import           System.Process            (proc)
 
 repo :: String
 repo = "haskell"
@@ -68,13 +66,13 @@ installedArgs = ["-I"]
 -- | Run a command and dump stdout to @stdout@, stderr to @stderr@, also
 --   capturing both streams.
 runTransparent ::
-     (IOE :> es, FileSystem :> es)
+     (IOE :> es, FileSystem :> es, Reader Args :> es)
   => FilePath -- ^ executable path
   -> [String] -- ^ arguments
        -- | Exit code, stdout, stderr
   -> Eff es (ExitCode, Stdout, Stderr)
 runTransparent exe args = do
-  void . printColor IO.stderr Magenta $ "Running: " ++ showCmd
+  bStderr . prettyMessage $ "Running: " ++ showCmd
   liftIO
     (sourceProcessWithStreams
        (proc exe args) -- { delegate_ctlc = True }

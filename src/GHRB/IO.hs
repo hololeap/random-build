@@ -9,8 +9,6 @@ module GHRB.IO
   ) where
 
 import qualified Data.ByteString.Char8         as BS (pack)
-import qualified Data.ByteString.Lazy          as BL (ByteString)
-import qualified Data.ByteString.Lazy.Char8    as BL (pack)
 import qualified Data.HashSet                  as Set (difference, intersection,
                                                        size)
 import           Data.List                     (uncons)
@@ -36,17 +34,20 @@ import           GHRB.Core.Types               (Args,
                                                 PackageSet,
                                                 PrelimEmergeResult (PrelimEmergeSuccess, ResolveFailed, TriedToDowngrade),
                                                 Running (Running, Terminated),
-                                                St, Stderr, Stdout,
+                                                St, Stderr, Stdout, failPackage,
                                                 getAllPackages, getEmerge,
                                                 getHU, getPquery, installed,
-                                                package, untried)
+                                                package, prettyPrintSt,
+                                                successPackage, untried)
+import           GHRB.Core.Utils               (prettyMessage, prettyPreMerge,
+                                                prettyTry)
 import           GHRB.IO.Cmd                   (defaultEmergeArgs,
                                                 defaultHUArgs,
                                                 defaultPqueryArgs,
                                                 installedArgs, repo,
                                                 runTransparent)
 import           GHRB.IO.Utils                 (bStderr, logOutput, stderr,
-                                                stdout)
+                                                stdout, bStdout)
 import           System.Exit                   (ExitCode (ExitFailure, ExitSuccess))
 
 tmpLogRoot :: String
@@ -97,7 +98,7 @@ currentUntried = do
   ap <- asks getAllPackages
   rawInstalled <- currentInstalled
   case rawInstalled of
-    Left _          -> pure rawInstalled
+    Left _     -> pure rawInstalled
     Right inst -> pure . Right $ Set.difference ap inst
 
 currentInstalled ::
@@ -110,14 +111,20 @@ currentInstalled = do
       case inst of
         (Just packageSet) -> pure . Right $ packageSet
         Nothing ->
-          stderr "pquery output parsing failed" >> pure (Left Terminated)
+          bStderr (prettyMessage "pquery output parsing failed")
+            >> pure (Left Terminated)
     ExitFailure 127 ->
-      stderr "Received exit code 127 from pquery. Is it installed"
+      bStderr
+        (prettyMessage "Received exit code 127 from pquery. Is it installed")
         >> pure (Left Terminated)
     ExitFailure 1 -> pure (Left Terminated)
     ExitFailure ef ->
-      stderr
-        ("pquery exited with unsuccessful code " ++ show ef ++ "\n" ++ stdErr)
+      bStderr
+        (prettyMessage
+           $ "pquery exited with unsuccessful code "
+               ++ show ef
+               ++ "\n"
+               ++ stdErr)
         >> pure (Left Terminated)
 
 tryInstall ::
@@ -130,8 +137,8 @@ tryInstall ::
   => Eff es (PrelimEmergeResult, String)
 tryInstall = do
   pkg <- gets package
-  stderr $ "Trying " ++ (T.unpack . prettyPackage $ pkg)
-  stderr "Checking for downgrades..."
+  bStderr . prettyTry $ "Trying " ++ (T.unpack . prettyPackage $ pkg)
+  bStderr . prettyMessage $ "Checking for downgrades..."
   (exitCode, output) <- capturePortageOutput pkg
   case exitCode of
     ExitSuccess -> processIfNotDowngrade output
@@ -163,12 +170,16 @@ install ::
   => Eff es (EmergeResult, Running)
 install = do
   pkg <- gets package
+  bStderr . prettyMessage $ "Preliminary emerge run succeeded..."
   (exitCode, _, _) <- runEmerge ["--keep-going=y"] pkg
   time <- currentTime
   let result =
         if exitCode == ExitSuccess
           then EmergeSuccess time
           else BuildFailed time
+  if exitCode == ExitSuccess
+    then bStderr (successPackage pkg)
+    else bStderr (failPackage pkg)
   (exitCode', _, _) <- runHaskellUpdater
   if exitCode' /= ExitSuccess
     then pure (result, Terminated)
@@ -192,7 +203,7 @@ failed output result = do
             ("downgrade-", t, " tried to downgrade", hasDowngraded)
           _ -> undefined
   logPortageOutput time prefix pkg output
-  stderr $ (T.unpack . prettyPackage $ pkg) ++ message
+  bStderr . prettyPreMerge $ (T.unpack . prettyPackage $ pkg) ++ message
   modify (op time pkg)
 
 logPortageOutput ::
@@ -214,14 +225,14 @@ logPortageOutput time pathCircumstances pkg output = do
        ++ output)
 
 totalStats ::
-     (State St :> es, Reader Args :> es, Process :> es) => Eff es BL.ByteString
+     (State St :> es, Reader Args :> es, Process :> es) => Eff es String
 totalStats = do
   inst <- gets installed
   total <- asks getAllPackages
   let is = Set.size . Set.intersection total $ inst
       ts = Set.size total
       pc = (100 * is) `div` ts
-  pure . BL.pack
+  pure 
     $ show is
         ++ " installed out of "
         ++ show ts
@@ -234,8 +245,8 @@ terminate ::
   => Eff es ()
 terminate = do
   st <- get :: (State St :> es) => Eff es St
-  stdout . BL.pack $ show st
-  stdout . BL.pack $ "\n"
+  bStdout . prettyPrintSt $ st
+  stdout "\n"
   totalStats >>= stdout
 
 capturePortageOutput ::
@@ -287,6 +298,8 @@ randomBuild = do
     Just (pkg, ps) -> do
       modify (\st -> st {package = pkg})
       modify (addTried pkg)
+      bStderr . prettyMessage
+        $ show (length ps + 1) ++ " packages left to consider.\n"
       (preliminaryEmergeResult, preliminaryOutput) <- tryInstall
       r <-
         case preliminaryEmergeResult of
@@ -306,6 +319,6 @@ randomBuild = do
               currentTime >>= \time ->
                 modify (updateInstalled time ps inst)
                   >> totalStats
-                  >>= bStderr
+                  >>= stderr
                   >> pure r
         else pure r
