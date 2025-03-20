@@ -2,11 +2,12 @@ cabal-version:   3.4
 name:            random-build
 version:         0.1.0.0
 synopsis:
-  A tool to build random Haskell packages in a gentoo repository and evaluate the success rate.
+  Build random packages in a Gentoo repository and evaluate the success rate
 
 description:
-  A tool to build random Haskell packages in a gentoo repository and
-  evaluate the success rate.
+  A tool to build random packages in a Gentoo repository and
+  evaluate the success rate. Currently, it only supports the ::haskell repo,
+  but support for other repos may be added in the future.
 
 homepage:
   https://github.com/gentoo-haskell/random-build
@@ -16,10 +17,19 @@ license-file:    LICENSE
 author:          Xavier Dectot
 maintainer:      xavier@wheredoibegin.fr
 
--- copyright:
+copyright:
+  Copyright 2025 Xavier Dectot
+  Copyright 2025 Gentoo Authors
+
 category:        Development
 build-type:      Simple
-extra-doc-files: CHANGELOG.md
+extra-doc-files:
+  CHANGELOG.md
+  README.md
+
+source-repository head
+  type:     git
+  location: https://github.com/gentoo-haskell/random-build.git
 
 common warnings
   ghc-options: -Wall
